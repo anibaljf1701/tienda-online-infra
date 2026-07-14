@@ -1,0 +1,44 @@
+# ──────────────────────────────────────────────
+# Terraform — state and working directories
+# ──────────────────────────────────────────────
+
+# State files — never commit, contain sensitive resource data
+*.tfstate
+*.tfstate.*
+
+# Terraform working directory — downloaded providers and modules
+.terraform/
+
+# Dependency lock file — excluded for portability across machines
+.terraform.lock.hcl
+
+# ──────────────────────────────────────────────
+# Terraform — variable and plan files
+# ──────────────────────────────────────────────
+
+# Variable files may contain secrets or environment-specific values
+*.tfvars
+
+# Compiled plan files — binary, environment-specific, not portable
+*.out
+tfplan*
+tplan*
+
+# ──────────────────────────────────────────────
+# IDE and tooling
+# ──────────────────────────────────────────────
+
+# Kiro IDE workspace files — local tooling, not part of the project
+.kiro/
+
+# JetBrains IDEs
+.idea/
+
+# VS Code workspace settings (optional — remove this line if you commit settings)
+.vscode/
+
+# ──────────────────────────────────────────────
+# OS generated files
+# ──────────────────────────────────────────────
+.DS_Store
+Thumbs.db
