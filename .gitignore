@@ -25,6 +25,13 @@ tfplan*
 tplan*
 
 # ──────────────────────────────────────────────
+# Terragrunt
+# ──────────────────────────────────────────────
+
+# Terragrunt cache — generated working directories, not portable
+.terragrunt-cache/
+
+# ──────────────────────────────────────────────
 # IDE and tooling
 # ──────────────────────────────────────────────
 
