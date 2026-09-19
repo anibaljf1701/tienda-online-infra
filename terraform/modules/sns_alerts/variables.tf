@@ -14,6 +14,11 @@ variable "environment" {
 }
 
 variable "sqs_queue_arn" {
-  description = "ARN of the SQS queue to subscribe to this SNS topic"
+  description = "ARN of the SQS orders queue to subscribe to this SNS topic"
+  type        = string
+}
+
+variable "sqs_queue_url" {
+  description = "URL of the SQS orders queue for the queue policy"
   type        = string
 }

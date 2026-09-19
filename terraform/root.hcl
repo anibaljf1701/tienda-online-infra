@@ -1,25 +1,27 @@
 # ─────────────────────────────────────────────────────────────────────────────
-# Root terragrunt.hcl
+# root.hcl
 #
-# WARNING: This configuration targets MiniStack (http://localhost:4566) for
-# LOCAL development only. For real AWS deployments:
-#   - Replace the remote_state S3 endpoint with a real AWS S3 bucket.
-#   - Remove access_key, secret_key, skip_*, and the endpoints block from
-#     the generate "provider" block.
-#   - Use IAM roles or AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY env vars.
+# Single source of truth for all stacks. Each stack includes this file via:
+#   include "root" { path = find_in_parent_folders("root.hcl") }
+#
+# find_in_parent_folders("env.hcl") is evaluated in the context of the
+# including stack, so it correctly resolves to live/{env}/env.hcl.
+#
+# WARNING: Targets MiniStack (http://localhost:4566) for LOCAL dev only.
+# For real AWS: remove access_key, secret_key, skip_* flags, endpoint,
+# and force_path_style. Use IAM roles or env vars instead.
 # ─────────────────────────────────────────────────────────────────────────────
 
 locals {
-  # Read environment-level values from the closest env.hcl up the directory tree
-  env_vars = read_terragrunt_config(find_in_parent_folders("env.hcl"))
-  env      = local.env_vars.locals.environment
+  # Resolved in the context of the including stack — finds live/{env}/env.hcl
+  env_vars    = read_terragrunt_config(find_in_parent_folders("env.hcl"))
+  environment = local.env_vars.locals.environment
 
   project = "tienda"
   region  = "us-east-1"
 }
 
 # ── Remote state ──────────────────────────────────────────────────────────────
-# Stored in MiniStack S3. Bucket and key are auto-derived from the stack path.
 remote_state {
   backend = "s3"
 
@@ -29,7 +31,7 @@ remote_state {
     region  = local.region
     encrypt = true
 
-    # MiniStack S3 endpoint — remove for real AWS
+    # MiniStack endpoint — remove for real AWS
     endpoint                    = "http://localhost:4566"
     access_key                  = "test"
     secret_key                  = "test"
@@ -46,7 +48,6 @@ remote_state {
 }
 
 # ── Provider generation ───────────────────────────────────────────────────────
-# Generates provider.tf in every stack automatically.
 generate "provider" {
   path      = "provider.tf"
   if_exists = "overwrite_terragrunt"
@@ -69,7 +70,7 @@ generate "provider" {
       default_tags {
         tags = {
           Project     = "${local.project}"
-          Environment = "${local.env}"
+          Environment = "${local.environment}"
           ManagedBy   = "Terraform"
         }
       }
@@ -91,9 +92,8 @@ generate "provider" {
 }
 
 # ── Global inputs ─────────────────────────────────────────────────────────────
-# Available in every stack's terragrunt.hcl as inputs.
 inputs = {
   project     = local.project
-  environment = local.env
+  environment = local.environment
   region      = local.region
 }

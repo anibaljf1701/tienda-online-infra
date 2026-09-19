@@ -1,8 +1,7 @@
 module "sqs_orders" {
-  source        = "../../modules/sqs_orders"
-  project       = var.project
-  environment   = var.environment
-  sns_topic_arn = module.sns_alerts.topic_arn
+  source      = "../../modules/sqs_orders"
+  project     = var.project
+  environment = var.environment
 }
 
 module "sns_alerts" {
@@ -10,6 +9,7 @@ module "sns_alerts" {
   project       = var.project
   environment   = var.environment
   sqs_queue_arn = module.sqs_orders.queue_arn
+  sqs_queue_url = module.sqs_orders.queue_url
 }
 
 module "s3_website" {

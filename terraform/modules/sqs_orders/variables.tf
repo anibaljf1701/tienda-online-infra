@@ -12,8 +12,3 @@ variable "environment" {
     error_message = "Environment must be 'dev' or 'prod'."
   }
 }
-
-variable "sns_topic_arn" {
-  description = "ARN of the SNS topic allowed to send messages to the SQS queue"
-  type        = string
-}

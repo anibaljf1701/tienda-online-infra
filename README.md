@@ -45,7 +45,7 @@ aws --profile local s3 mb s3://tienda-tfstate
 
 # 4. Deploy dev environment
 cd terraform/live/dev
-terragrunt run-all apply --terragrunt-non-interactive
+terragrunt run --all apply --terragrunt-non-interactive
 
 # 5. Open the product catalog
 # http://localhost:4566/tienda-dev-static/index.html
@@ -60,7 +60,7 @@ terragrunt run-all apply --terragrunt-non-interactive
 | Tool | Version | Purpose |
 |------|---------|---------|
 | Terraform | >= 1.6.0 | Infrastructure provisioning |
-| Terragrunt | >= 0.55.0 | DRY wrapper — remote state, provider generation, dependency management |
+| Terragrunt | >= 0.67.0 | DRY wrapper — remote state, provider generation, dependency management |
 | AWS Provider | ~> 6.54.0 | AWS resource management |
 | MiniStack | 1.4.x | Local AWS emulator |
 
@@ -70,7 +70,7 @@ terragrunt run-all apply --terragrunt-non-interactive
 
 The `dev` and `prod` environments share identical infrastructure logic. Without Terragrunt, `providers.tf`, `variables.tf`, `outputs.tf`, and `main.tf` would be duplicated across both environments. Terragrunt eliminates that duplication:
 
-- **Root `terragrunt.hcl`** — defines remote state backend and generates `provider.tf` for every stack automatically
+- **`root.hcl`** — root marker file; the actual remote state and provider generation live in each env-level `terragrunt.hcl`
 - **`env.hcl`** — single file per environment declaring `environment = "dev"` or `"prod"`
 - **Per-stack `terragrunt.hcl`** — declares the module source and cross-stack dependencies only; all other config is inherited
 
@@ -83,7 +83,7 @@ tienda_online/
 ├── .gitignore
 ├── README.md
 └── terraform/
-    ├── terragrunt.hcl              ← root: remote state + provider generation + global inputs
+    ├── root.hcl                    ← root marker (empty); env config lives in live/{env}/terragrunt.hcl
     ├── modules/                    ← reusable Terraform modules (no Terragrunt awareness)
     │   ├── s3_website/
     │   │   ├── versions.tf
@@ -134,7 +134,7 @@ tienda_online/
 | Docker | >= 24 | [docs.docker.com](https://docs.docker.com/engine/install/) |
 | MiniStack | 1.4.x | `docker pull ministackorg/ministack` |
 | Terraform | >= 1.6.0 | [developer.hashicorp.com](https://developer.hashicorp.com/terraform/install) |
-| Terragrunt | >= 0.55.0 | see below |
+| Terragrunt | >= 0.67.0 | see below |
 | AWS CLI | v2 | `sudo /tmp/aws/install` after download |
 
 ### Start MiniStack
@@ -243,7 +243,7 @@ terragrunt apply
 
 ```bash
 cd terraform/live/dev
-terragrunt run-all apply
+terragrunt run --all apply
 ```
 
 Terragrunt resolves dependency order automatically — SNS/SQS are applied in the correct sequence.
@@ -252,7 +252,7 @@ Terragrunt resolves dependency order automatically — SNS/SQS are applied in th
 
 ```bash
 cd terraform/live
-terragrunt run-all apply
+terragrunt run --all apply
 ```
 
 ---
@@ -293,7 +293,7 @@ On first `apply`, Terragrunt applies each stack sequentially and wires the real 
 
 ## Verification Commands
 
-After `terragrunt run-all apply` in `live/dev/`:
+After `terragrunt run --all apply` in `live/dev/`:
 
 ```bash
 # S3 static website
@@ -338,4 +338,4 @@ locals {
 }
 ```
 
-That single value propagates via the root `terragrunt.hcl` to every stack's provider, resource names (`tienda-dev-*` vs `tienda-prod-*`), tags, and state key paths. No Terraform files are duplicated between environments.
+That single value propagates via the environment-level `terragrunt.hcl` to every stack's provider, resource names (`tienda-dev-*` vs `tienda-prod-*`), tags, and state key paths. No Terraform files are duplicated between environments.
