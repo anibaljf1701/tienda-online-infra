@@ -24,7 +24,7 @@ Provisions S3 static website hosting, SQS order queues, SNS alerts, DynamoDB pro
 └─────────────────────────────────────────────────────────┘
 ```
 
-Each environment (`dev`, `prod`) has its own isolated set of resources and its own Terraform state file stored in the `tienda-tfstate` S3 bucket.
+Each environment (`dev`, `prod`; `stg` can be added following the AWS guidance below) has its own isolated set of resources and Terraform state files in `tienda-tfstate`.
 
 ---
 
@@ -45,13 +45,14 @@ aws --profile local s3 mb s3://tienda-tfstate
 
 # 4. Deploy dev environment
 cd terraform/live/dev
-terragrunt run --all apply --terragrunt-non-interactive
+terragrunt run --all plan
+terragrunt run --all apply
 
 # 5. Open the product catalog
 # http://localhost:4566/tienda-dev-static/index.html
 ```
 
-> **Note:** The `--terragrunt-non-interactive` flag skips the confirmation prompts. Remove it if you want to review the plan before applying.
+> **Note:** Review the plan output before applying. Do not use auto-approve for a first deployment or production changes.
 
 ---
 
@@ -60,7 +61,7 @@ terragrunt run --all apply --terragrunt-non-interactive
 | Tool | Version | Purpose |
 |------|---------|---------|
 | Terraform | >= 1.6.0 | Infrastructure provisioning |
-| Terragrunt | >= 0.67.0 | DRY wrapper — remote state, provider generation, dependency management |
+| Terragrunt | >= 1.1.0 | DRY wrapper — remote state, provider generation, dependency management |
 | AWS Provider | ~> 6.54.0 | AWS resource management |
 | MiniStack | 1.4.x | Local AWS emulator |
 
@@ -70,9 +71,9 @@ terragrunt run --all apply --terragrunt-non-interactive
 
 The `dev` and `prod` environments share identical infrastructure logic. Without Terragrunt, `providers.tf`, `variables.tf`, `outputs.tf`, and `main.tf` would be duplicated across both environments. Terragrunt eliminates that duplication:
 
-- **`root.hcl`** — root marker file; the actual remote state and provider generation live in each env-level `terragrunt.hcl`
+- **`root.hcl`** — shared remote-state, provider generation, tags, and common inputs
 - **`env.hcl`** — single file per environment declaring `environment = "dev"` or `"prod"`
-- **Per-stack `terragrunt.hcl`** — declares the module source and cross-stack dependencies only; all other config is inherited
+- **Per-stack `terragrunt.hcl`** — declares the module source and cross-stack dependencies; shared config is inherited from `root.hcl`
 
 ---
 
@@ -83,7 +84,8 @@ tienda_online/
 ├── .gitignore
 ├── README.md
 └── terraform/
-    ├── root.hcl                    ← root marker (empty); env config lives in live/{env}/terragrunt.hcl
+    ├── root.hcl                    ← shared backend, provider, and common inputs
+    ├── environments/               ← standalone Terraform roots (dev/prod; duplicate module wiring)
     ├── modules/                    ← reusable Terraform modules (no Terragrunt awareness)
     │   ├── s3_website/
     │   │   ├── versions.tf
@@ -111,7 +113,7 @@ tienda_online/
         │   │   └── terragrunt.hcl
         │   └── secrets/
         │       └── terragrunt.hcl
-        └── prod/
+        ├── prod/
             ├── env.hcl             ← environment = "prod"
             ├── s3_website/
             │   └── terragrunt.hcl
@@ -123,6 +125,7 @@ tienda_online/
             │   └── terragrunt.hcl
             └── secrets/
                 └── terragrunt.hcl
+        └── stg/                    ← same env.hcl + stack directories when added
 ```
 
 ---
@@ -134,7 +137,7 @@ tienda_online/
 | Docker | >= 24 | [docs.docker.com](https://docs.docker.com/engine/install/) |
 | MiniStack | 1.4.x | `docker pull ministackorg/ministack` |
 | Terraform | >= 1.6.0 | [developer.hashicorp.com](https://developer.hashicorp.com/terraform/install) |
-| Terragrunt | >= 0.67.0 | see below |
+| Terragrunt | >= 1.1.0 | see below |
 | AWS CLI | v2 | `sudo /tmp/aws/install` after download |
 
 ### Start MiniStack
@@ -243,6 +246,7 @@ terragrunt apply
 
 ```bash
 cd terraform/live/dev
+terragrunt run --all plan
 terragrunt run --all apply
 ```
 
@@ -280,14 +284,13 @@ aws --profile local s3 ls s3://tienda-tfstate --recursive
 
 ## Cross-Stack Dependencies
 
-SNS and SQS have a circular dependency by design (each needs the other's ARN for the subscription/policy). Terragrunt resolves this with `dependency` blocks and `mock_outputs` for plan/validate:
+The SNS stack depends on SQS because it needs the queue ARN and URL to create the subscription and queue policy. The dependency is one-way; there is no cycle:
 
 ```
-sns_alerts  ──depends_on──▶  sqs_orders (needs queue_arn)
-sqs_orders  ──depends_on──▶  sns_alerts (needs topic_arn)
+sns_alerts  ──depends_on──▶  sqs_orders (needs queue_arn and queue_url)
 ```
 
-On first `apply`, Terragrunt applies each stack sequentially and wires the real ARNs automatically.
+Terragrunt applies SQS before SNS and passes the real queue outputs to the SNS stack. `mock_outputs` are only for `validate`/`plan` when the dependency has not yet been deployed; they are not used by `apply`.
 
 ---
 
@@ -338,4 +341,39 @@ locals {
 }
 ```
 
-That single value propagates via the environment-level `terragrunt.hcl` to every stack's provider, resource names (`tienda-dev-*` vs `tienda-prod-*`), tags, and state key paths. No Terraform files are duplicated between environments.
+That value is read by `root.hcl` and propagates to every stack's provider, resource names (`tienda-dev-*` vs `tienda-prod-*`), tags, and state key paths. The Terragrunt stacks reuse modules, but `terraform/environments/dev` and `terraform/environments/prod` are separate Terraform roots that duplicate module wiring; choose one deployment workflow and avoid managing the same resources through both.
+
+---
+
+## Deploying to AWS (`dev`, `stg`, `prod`)
+
+The current configuration is for MiniStack only. It must **not** be pointed at AWS as-is: the provider and S3 backend use `localhost:4566` and test credentials, and the website module grants public object reads. Treat the following as required work before any AWS deployment.
+
+### Required configuration changes
+
+1. **Create an AWS Terragrunt configuration path.** Prefer separate MiniStack and AWS root configs (for example, `root.ministack.hcl` and `root.aws.hcl`) so local endpoint settings cannot accidentally reach AWS. In the AWS provider, remove hard-coded `access_key`/`secret_key`, all `skip_*` flags, and the `endpoints` block. Use an AWS CLI SSO profile for local work or an IAM role/OIDC in CI, and pass a region per environment. Do not commit credentials.
+2. **Use an AWS remote-state bucket.** Create the bucket outside the application stacks in the target account, enable versioning, encryption, and public-access blocking, and scope IAM access to the deployment role. Use a globally unique bucket name. Keep environment/stack state keys isolated; for production, consider a separate AWS account and state bucket. Enable S3 lock files (`use_lockfile = true`) and raise the Terraform minimum to `>= 1.10.0` if using that locking mechanism. Never reuse MiniStack state for AWS.
+3. **Add the `stg` environment.** Create `terraform/live/stg/env.hcl` with `environment = "stg"` and copy the five stack `terragrunt.hcl` files from dev, retaining their module sources and dependency declarations. Update every environment validation in `terraform/environments/*/variables.tf` and `terraform/modules/*/variables.tf` to allow `stg` (or replace the hard-coded list with a documented environment policy). Add `stg` to the directory tree and CI checks. Set distinct state keys and review all resource names before applying.
+4. **Make the website production-safe.** The current S3 website module disables public-access protections and allows `Principal = "*"`; it is only suitable for the local demo. For AWS production, keep the bucket private and serve it through CloudFront with Origin Access Control (OAC), TLS, and an appropriate DNS/certificate setup. If public S3 website hosting is deliberately retained for a non-production environment, make that behavior an explicit opt-in rather than a default.
+5. **Review production controls.** Use separate AWS accounts or strong role boundaries for dev/stg/prod; define least-privilege deployment permissions; configure provider default tags; review SQS retention/visibility/redrive settings, SNS delivery/alarms, DynamoDB backups/PITR and encryption, and Secrets Manager rotation/access. Protect Terraform state because it can contain secret values, restrict access to plans/state, and do not print secrets in CI logs.
+6. **Choose one source of truth.** `terraform/environments/{dev,prod}` are standalone roots with their own MiniStack provider configuration. Either retire them and deploy only through `terraform/live`, or update them to use the same AWS-safe provider/backend design; do not apply both paths to the same environment.
+
+### Suggested AWS deployment flow
+
+After implementing and reviewing the changes above, configure AWS SSO/role access and verify the active account and region before every deployment. Deploy environments separately, review plans, and apply only the reviewed plan:
+
+```bash
+aws sts get-caller-identity --profile tienda-dev
+cd terraform/live/dev
+terragrunt run --all plan
+terragrunt run --all apply
+```
+
+Repeat with the appropriate profile and directory for `stg` and `prod`. Use production approvals in CI/CD, and do not run `terragrunt run --all apply` from `terraform/live` against AWS because that applies every environment in one operation.
+
+### Current review notes
+
+- `terraform fmt -check -recursive terraform` reports formatting needed in `terraform/modules/s3_website/main.tf`.
+- HCL validation succeeds, with warnings that SNS receives mock SQS outputs when the dependency stack has not been applied.
+- The documented MiniStack health URL (`/_localstack/health`) should be checked against the exact MiniStack image/version; it uses a LocalStack-style path.
+- The project provisions foundational demo services, not a complete production commerce platform. Authentication, checkout/payment processing, application runtime, observability, backups, and a CDN/domain are outside the current modules.
