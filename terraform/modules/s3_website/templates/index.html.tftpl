@@ -124,8 +124,8 @@
       %{ for product in products ~}
       <div class="product-card">
         <span class="product-name">${product.name}</span>
-        <span class="product-price">&#36;${product.price}</span>
-        <span class="stock-badge stock-${product.stock}">${lookup({"in_stock":"In Stock","low_stock":"Low Stock","out_of_stock":"Out of Stock"}, product.stock, "Unknown")}</span>
+        <span class="product-price">&#36;${format("%.2f", product.price)}</span>
+        <span class="stock-badge stock-${product.stock == 0 ? "out_of_stock" : product.stock <= 5 ? "low_stock" : "in_stock"}">${product.stock == 0 ? "Out of Stock" : product.stock <= 5 ? "Low Stock" : "In Stock"} (${product.stock})</span>
       </div>
       %{ endfor ~}
     </div>

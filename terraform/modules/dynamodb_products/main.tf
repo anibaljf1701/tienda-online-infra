@@ -18,7 +18,7 @@ resource "aws_dynamodb_table_item" "seed" {
   item = jsonencode({
     id    = { S = each.key }
     name  = { S = each.value.name }
-    price = { S = each.value.price }
-    stock = { S = each.value.stock }
+    price = { N = tostring(each.value.price) }
+    stock = { N = tostring(each.value.stock) }
   })
 }

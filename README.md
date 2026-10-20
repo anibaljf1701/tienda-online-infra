@@ -24,7 +24,7 @@ Provisions S3 static website hosting, SQS order queues, SNS alerts, DynamoDB pro
 └─────────────────────────────────────────────────────────┘
 ```
 
-Each environment (`dev`, `prod`; `stg` can be added following the AWS guidance below) has its own isolated set of resources and Terraform state files in `tienda-tfstate`.
+Each environment (`dev`, `stg`, `prod`) has its own isolated set of resources and Terraform state files in `tienda-tfstate`.
 
 ---
 
@@ -69,10 +69,10 @@ terragrunt run --all apply
 
 ## Why Terragrunt?
 
-The `dev` and `prod` environments share identical infrastructure logic. Without Terragrunt, `providers.tf`, `variables.tf`, `outputs.tf`, and `main.tf` would be duplicated across both environments. Terragrunt eliminates that duplication:
+The `dev`, `stg`, and `prod` environments share the same Terraform modules. Terragrunt keeps the environment configuration and stack dependencies in one source of truth:
 
 - **`root.hcl`** — shared remote-state, provider generation, tags, and common inputs
-- **`env.hcl`** — single file per environment declaring `environment = "dev"` or `"prod"`
+- **`env.hcl`** — one file per environment declaring `environment = "dev"`, `"stg"`, or `"prod"`
 - **Per-stack `terragrunt.hcl`** — declares the module source and cross-stack dependencies; shared config is inherited from `root.hcl`
 
 ---
@@ -85,7 +85,6 @@ tienda_online/
 ├── README.md
 └── terraform/
     ├── root.hcl                    ← shared backend, provider, and common inputs
-    ├── environments/               ← standalone Terraform roots (dev/prod; duplicate module wiring)
     ├── modules/                    ← reusable Terraform modules (no Terragrunt awareness)
     │   ├── s3_website/
     │   │   ├── versions.tf
@@ -113,7 +112,14 @@ tienda_online/
         │   │   └── terragrunt.hcl
         │   └── secrets/
         │       └── terragrunt.hcl
-        ├── prod/
+        ├── stg/
+        │   ├── env.hcl             ← environment = "stg"
+        │   ├── s3_website/terragrunt.hcl
+        │   ├── sqs_orders/terragrunt.hcl
+        │   ├── sns_alerts/terragrunt.hcl
+        │   ├── dynamodb_products/terragrunt.hcl
+        │   └── secrets/terragrunt.hcl
+        └── prod/
             ├── env.hcl             ← environment = "prod"
             ├── s3_website/
             │   └── terragrunt.hcl
@@ -125,8 +131,9 @@ tienda_online/
             │   └── terragrunt.hcl
             └── secrets/
                 └── terragrunt.hcl
-        └── stg/                    ← same env.hcl + stack directories when added
 ```
+
+    `terraform/live` is the only supported deployment root. Do not run Terraform directly from a module directory or maintain separate per-environment root modules.
 
 ---
 
@@ -154,9 +161,11 @@ docker run --rm -d \
 Verify it is healthy:
 
 ```bash
-curl -s http://localhost:4566/_localstack/health | python3 -m json.tool | grep '"dynamodb"'
+curl -s http://localhost:4566/_ministack/health | python3 -m json.tool | grep '"dynamodb"'
 # Expected: "dynamodb": "available"
 ```
+
+`/_ministack/health` is MiniStack's documented health endpoint. MiniStack also accepts `/_localstack/health` for LocalStack compatibility.
 
 ### Install Terraform (Linux)
 
@@ -252,12 +261,15 @@ terragrunt run --all apply
 
 Terragrunt resolves dependency order automatically — SNS/SQS are applied in the correct sequence.
 
-### Deploy all environments
+### Deploy all environments (local MiniStack only)
 
 ```bash
 cd terraform/live
+terragrunt run --all plan
 terragrunt run --all apply
 ```
+
+This command applies `dev`, `stg`, and `prod`; deploy one environment at a time for AWS.
 
 ---
 
@@ -272,6 +284,7 @@ Each stack stores its state in MiniStack S3 under the path derived from the dire
 | dev/sns_alerts | `live/dev/sns_alerts/terraform.tfstate` |
 | dev/dynamodb_products | `live/dev/dynamodb_products/terraform.tfstate` |
 | dev/secrets | `live/dev/secrets/terraform.tfstate` |
+| stg/... | `live/stg/.../terraform.tfstate` |
 | prod/... | `live/prod/.../terraform.tfstate` |
 
 Inspect state files:
@@ -325,7 +338,7 @@ aws --profile local s3 ls s3://tienda-tfstate --recursive
 
 ---
 
-## Dev vs Prod Differences
+## Environment Differences
 
 The only source of environment-specific config is `env.hcl`:
 
@@ -335,32 +348,51 @@ locals {
   environment = "dev"
 }
 
+# live/stg/env.hcl
+locals {
+  environment = "stg"
+}
+
 # live/prod/env.hcl
 locals {
   environment = "prod"
 }
 ```
 
-That value is read by `root.hcl` and propagates to every stack's provider, resource names (`tienda-dev-*` vs `tienda-prod-*`), tags, and state key paths. The Terragrunt stacks reuse modules, but `terraform/environments/dev` and `terraform/environments/prod` are separate Terraform roots that duplicate module wiring; choose one deployment workflow and avoid managing the same resources through both.
+That value is read by `root.hcl` and propagates to every stack's provider, resource names (`tienda-dev-*`, `tienda-stg-*`, `tienda-prod-*`), tags, and state key paths. All three environments use the same modules and `terraform/live` Terragrunt stacks. There are no separate Terraform environment roots; `live` is the source of truth.
 
 ---
 
 ## Deploying to AWS (`dev`, `stg`, `prod`)
 
-The current configuration is for MiniStack only. It must **not** be pointed at AWS as-is: the provider and S3 backend use `localhost:4566` and test credentials, and the website module grants public object reads. Treat the following as required work before any AWS deployment.
+The current configuration is for MiniStack only and remains unchanged for local use. Do not point it at AWS as-is: the provider and S3 backend use `localhost:4566` and test credentials, and the website module grants public object reads. Make the following changes in an AWS-specific copy/branch of the configuration before any AWS deployment; never mix the MiniStack and AWS state or credentials.
 
 ### Required configuration changes
 
-1. **Create an AWS Terragrunt configuration path.** Prefer separate MiniStack and AWS root configs (for example, `root.ministack.hcl` and `root.aws.hcl`) so local endpoint settings cannot accidentally reach AWS. In the AWS provider, remove hard-coded `access_key`/`secret_key`, all `skip_*` flags, and the `endpoints` block. Use an AWS CLI SSO profile for local work or an IAM role/OIDC in CI, and pass a region per environment. Do not commit credentials.
-2. **Use an AWS remote-state bucket.** Create the bucket outside the application stacks in the target account, enable versioning, encryption, and public-access blocking, and scope IAM access to the deployment role. Use a globally unique bucket name. Keep environment/stack state keys isolated; for production, consider a separate AWS account and state bucket. Enable S3 lock files (`use_lockfile = true`) and raise the Terraform minimum to `>= 1.10.0` if using that locking mechanism. Never reuse MiniStack state for AWS.
-3. **Add the `stg` environment.** Create `terraform/live/stg/env.hcl` with `environment = "stg"` and copy the five stack `terragrunt.hcl` files from dev, retaining their module sources and dependency declarations. Update every environment validation in `terraform/environments/*/variables.tf` and `terraform/modules/*/variables.tf` to allow `stg` (or replace the hard-coded list with a documented environment policy). Add `stg` to the directory tree and CI checks. Set distinct state keys and review all resource names before applying.
-4. **Make the website production-safe.** The current S3 website module disables public-access protections and allows `Principal = "*"`; it is only suitable for the local demo. For AWS production, keep the bucket private and serve it through CloudFront with Origin Access Control (OAC), TLS, and an appropriate DNS/certificate setup. If public S3 website hosting is deliberately retained for a non-production environment, make that behavior an explicit opt-in rather than a default.
-5. **Review production controls.** Use separate AWS accounts or strong role boundaries for dev/stg/prod; define least-privilege deployment permissions; configure provider default tags; review SQS retention/visibility/redrive settings, SNS delivery/alarms, DynamoDB backups/PITR and encryption, and Secrets Manager rotation/access. Protect Terraform state because it can contain secret values, restrict access to plans/state, and do not print secrets in CI logs.
-6. **Choose one source of truth.** `terraform/environments/{dev,prod}` are standalone roots with their own MiniStack provider configuration. Either retire them and deploy only through `terraform/live`, or update them to use the same AWS-safe provider/backend design; do not apply both paths to the same environment.
+1. **Use AWS credentials and provider settings.** Keep the current `terraform/root.hcl` for MiniStack. For AWS, create a separate root config and have the live stacks include it in the AWS deployment branch/configuration. In the AWS provider block remove `access_key`, `secret_key`, `skip_credentials_validation`, `skip_metadata_api_check`, `skip_requesting_account_id`, and the complete `endpoints` block. Use AWS CLI SSO credentials locally or an IAM role/OIDC in CI; never commit credentials. Set the AWS region explicitly per environment. The AWS provider should rely on its normal credential chain, for example:
+
+   ```hcl
+   provider "aws" {
+     region = "us-east-1"
+
+     default_tags {
+       tags = {
+         Project     = "tienda"
+         Environment = "dev"
+         ManagedBy   = "Terraform"
+       }
+     }
+   }
+   ```
+
+2. **Use a dedicated AWS remote-state bucket.** Create it outside these application stacks in the target AWS account. Enable versioning, server-side encryption, S3 public-access blocking, and least-privilege access for deployment roles. Use a globally unique bucket name and a separate bucket/account for production where possible. In the AWS `remote_state.config`, remove MiniStack's `endpoint`, test `access_key`/`secret_key`, all `skip_*` options, and `force_path_style`; set the AWS bucket, region, encryption, and a unique key per environment/stack. Enable S3 lock files with `use_lockfile = true` and raise every Terraform `required_version` minimum to `>= 1.10.0`. Never point AWS at `tienda-tfstate` in MiniStack or reuse local state.
+3. **Deploy the existing `stg` environment.** `terraform/live/stg` already contains `env.hcl` and all five stack configs. It is accepted by the module environment validations and has isolated names/state keys. Include `stg` in CI plan checks and deploy from that directory, just as with dev/prod.
+4. **Keep public S3 behavior local; change it for AWS.** The current S3 module deliberately disables all four public-access-block settings and attaches a policy granting `s3:GetObject` to `Principal = "*"`. Leave it unchanged for the local MiniStack demo. For AWS, set all four public-access-block settings to `true`, remove that public policy, and keep the bucket private. Add a CloudFront distribution using the S3 REST endpoint (not the S3 website endpoint), configure Origin Access Control (OAC), and add a bucket policy that grants `s3:GetObject` only to `cloudfront.amazonaws.com`, conditioned on the specific CloudFront distribution ARN. Configure TLS and DNS as required. Implement these as AWS-specific module inputs/resources so MiniStack behavior remains local-only; inspect the plan and resulting bucket policy before applying.
+5. **Review production controls.** Use separate AWS accounts or strong role boundaries for dev/stg/prod; define least-privilege deployment permissions; review SQS retention/visibility/redrive settings, SNS delivery/alarms, DynamoDB backups/PITR and encryption, and Secrets Manager rotation/access. State and plan artifacts can contain sensitive values: restrict access, encrypt them, and do not print secrets in CI logs. Deploy one environment at a time with production approvals.
 
 ### Suggested AWS deployment flow
 
-After implementing and reviewing the changes above, configure AWS SSO/role access and verify the active account and region before every deployment. Deploy environments separately, review plans, and apply only the reviewed plan:
+After creating the AWS-specific root/provider/backend and making the S3 website private behind CloudFront, configure AWS SSO/role access and verify the active account and region before every deployment. Deploy environments separately, review plans, and apply only the reviewed plan:
 
 ```bash
 aws sts get-caller-identity --profile tienda-dev
@@ -373,7 +405,6 @@ Repeat with the appropriate profile and directory for `stg` and `prod`. Use prod
 
 ### Current review notes
 
-- `terraform fmt -check -recursive terraform` reports formatting needed in `terraform/modules/s3_website/main.tf`.
-- HCL validation succeeds, with warnings that SNS receives mock SQS outputs when the dependency stack has not been applied.
-- The documented MiniStack health URL (`/_localstack/health`) should be checked against the exact MiniStack image/version; it uses a LocalStack-style path.
+- Product `price` and `stock` are DynamoDB Number attributes. `stock` is a unit count; the catalog shows zero as out of stock and quantities of five or less as low stock. Review the Terraform plan when upgrading an existing deployment so seeded item values change from strings to numbers; manually managed records need their own migration.
+- MiniStack's documented health route is `/_ministack/health`. It also accepts `/_localstack/health` as a LocalStack-compatible alias.
 - The project provisions foundational demo services, not a complete production commerce platform. Authentication, checkout/payment processing, application runtime, observability, backups, and a CDN/domain are outside the current modules.

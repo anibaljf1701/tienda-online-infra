@@ -49,9 +49,9 @@ resource "aws_s3_bucket_policy" "main" {
 
 # Upload index.html rendered from a templatefile with environment, project, and products
 resource "aws_s3_object" "index" {
-  bucket       = aws_s3_bucket.main.id
-  key          = "index.html"
-  content      = templatefile("${path.module}/templates/index.html.tftpl", {
+  bucket = aws_s3_bucket.main.id
+  key    = "index.html"
+  content = templatefile("${path.module}/templates/index.html.tftpl", {
     environment = var.environment
     project     = var.project
     products    = local.seed_products
