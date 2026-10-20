@@ -1,91 +1,83 @@
-# Tienda Online Infrastructure
+# Infraestructura de Tienda Online
 
-Terraform + Terragrunt infrastructure for a local online store demo using **MiniStack** (local AWS emulator on `localhost:4566`).
+Infraestructura como código con Terraform y Terragrunt para una tienda online de demostración. Usa **MiniStack** como emulador local de AWS en `localhost:4566`.
 
-Provisions S3 static website hosting, SQS order queues, SNS alerts, DynamoDB products table, and Secrets Manager — isolated per environment, with remote state stored in MiniStack S3.
+Provisiona alojamiento web estático en S3, colas de pedidos en SQS, alertas en SNS, una tabla de productos en DynamoDB y secretos en Secrets Manager. Cada entorno se mantiene aislado y el estado remoto se almacena en el S3 de MiniStack.
 
 ---
 
-## Architecture
+## Arquitectura
 
 ```
 ┌─────────────────────────────────────────────────────────┐
 │                   MiniStack (localhost:4566)             │
 │                                                         │
 │  ┌──────────┐    ┌─────────┐    ┌───────────────────┐  │
-│  │ S3 Static│    │   SNS   │───▶│   SQS Orders      │  │
-│  │ Website  │    │  Alerts │    │   Queue + DLQ     │  │
+│  │ Sitio web│    │   SNS   │───▶│   Pedidos SQS     │  │
+│  │ estático │    │ Alertas │    │ Cola + DLQ        │  │
 │  └──────────┘    └─────────┘    └───────────────────┘  │
 │                                                         │
 │  ┌──────────────────┐    ┌─────────────────────────┐   │
 │  │  DynamoDB        │    │  Secrets Manager        │   │
-│  │  Products Table  │    │  db_password secret     │   │
+│  │ Tabla productos  │    │ Secreto db_password     │   │
 │  └──────────────────┘    └─────────────────────────┘   │
 └─────────────────────────────────────────────────────────┘
 ```
 
-Each environment (`dev`, `stg`, `prod`) has its own isolated set of resources and Terraform state files in `tienda-tfstate`.
+Cada entorno (`dev`, `stg`, `prod`) tiene sus propios recursos y archivos de estado de Terraform, almacenados en `tienda-tfstate`.
 
----
+## Inicio rápido
 
-## Quick Start
-
-Clone the repo and follow these steps to have the full infrastructure running locally in under 5 minutes.
+Clona el repositorio y sigue estos pasos para levantar la infraestructura local.
 
 ```bash
-# 1. Clone
+# 1. Clonar el repositorio
 git clone https://github.com/YOUR_USERNAME/tienda-online-infra.git
 cd tienda-online-infra
 
-# 2. Start MiniStack
+# 2. Iniciar MiniStack
 docker run --rm -d --name ministack -p 4566:4566 ministackorg/ministack
 
-# 3. Create the remote state bucket
+# 3. Crear el bucket para el estado remoto
 aws --profile local s3 mb s3://tienda-tfstate
 
-# 4. Deploy dev environment
+# 4. Desplegar el entorno dev
 cd terraform/live/dev
 terragrunt run --all plan
 terragrunt run --all apply
 
-# 5. Open the product catalog
+# 5. Abrir el catálogo de productos
 # http://localhost:4566/tienda-dev-static/index.html
 ```
 
-> **Note:** Review the plan output before applying. Do not use auto-approve for a first deployment or production changes.
+> **Nota:** Revisa el resultado del plan antes de aplicarlo. No uses aprobación automática en el primer despliegue ni para cambios en producción.
 
----
+## Tecnologías
 
-## Stack
-
-| Tool | Version | Purpose |
+| Herramienta | Versión | Uso |
 |------|---------|---------|
-| Terraform | >= 1.6.0 | Infrastructure provisioning |
-| Terragrunt | >= 1.1.0 | DRY wrapper — remote state, provider generation, dependency management |
-| AWS Provider | ~> 6.54.0 | AWS resource management |
-| MiniStack | 1.4.x | Local AWS emulator |
+| Terraform | >= 1.6.0 | Aprovisionamiento de infraestructura |
+| Terragrunt | >= 1.1.0 | Configuración compartida, estado remoto y dependencias |
+| AWS Provider | ~> 6.54.0 | Administración de recursos AWS |
+| MiniStack | 1.4.x | Emulador local de AWS |
 
----
+## ¿Por qué Terragrunt?
 
-## Why Terragrunt?
+Los entornos `dev`, `stg` y `prod` reutilizan los mismos módulos de Terraform. Terragrunt concentra la configuración por entorno y las dependencias entre stacks:
 
-The `dev`, `stg`, and `prod` environments share the same Terraform modules. Terragrunt keeps the environment configuration and stack dependencies in one source of truth:
+- **`root.hcl`**: configuración compartida del estado remoto, generación del provider, etiquetas e inputs comunes.
+- **`env.hcl`**: un archivo por entorno que declara `environment = "dev"`, `"stg"` o `"prod"`.
+- **`terragrunt.hcl` de cada stack**: declara el módulo y sus dependencias; hereda la configuración común de `root.hcl`.
 
-- **`root.hcl`** — shared remote-state, provider generation, tags, and common inputs
-- **`env.hcl`** — one file per environment declaring `environment = "dev"`, `"stg"`, or `"prod"`
-- **Per-stack `terragrunt.hcl`** — declares the module source and cross-stack dependencies; shared config is inherited from `root.hcl`
-
----
-
-## Directory Structure
+## Estructura de directorios
 
 ```
 tienda_online/
 ├── .gitignore
 ├── README.md
 └── terraform/
-    ├── root.hcl                    ← shared backend, provider, and common inputs
-    ├── modules/                    ← reusable Terraform modules (no Terragrunt awareness)
+    ├── root.hcl                    ← backend, provider e inputs compartidos
+    ├── modules/                    ← módulos Terraform reutilizables, independientes de Terragrunt
     │   ├── s3_website/
     │   │   ├── versions.tf
     │   │   ├── variables.tf
@@ -99,7 +91,7 @@ tienda_online/
     │   ├── sns_alerts/
     │   ├── dynamodb_products/
     │   └── secrets/
-    └── live/                       ← Terragrunt live infrastructure
+    └── live/                       ← configuración Terragrunt por entorno
         ├── dev/
         │   ├── env.hcl             ← environment = "dev"
         │   ├── s3_website/
@@ -133,23 +125,21 @@ tienda_online/
                 └── terragrunt.hcl
 ```
 
-    `terraform/live` is the only supported deployment root. Do not run Terraform directly from a module directory or maintain separate per-environment root modules.
+`terraform/live` es la única raíz de despliegue soportada. No ejecutes Terraform directamente desde un directorio de módulo ni mantengas otras raíces por entorno.
 
----
+## Requisitos previos
 
-## Prerequisites
-
-| Tool | Version | Install |
+| Herramienta | Versión | Instalación |
 |------|---------|---------|
-| Docker | >= 24 | [docs.docker.com](https://docs.docker.com/engine/install/) |
+| Docker | >= 24 | [Documentación de Docker](https://docs.docker.com/engine/install/) |
 | MiniStack | 1.4.x | `docker pull ministackorg/ministack` |
-| Terraform | >= 1.6.0 | [developer.hashicorp.com](https://developer.hashicorp.com/terraform/install) |
-| Terragrunt | >= 1.1.0 | see below |
-| AWS CLI | v2 | `sudo /tmp/aws/install` after download |
+| Terraform | >= 1.6.0 | [Instalación de Terraform](https://developer.hashicorp.com/terraform/install) |
+| Terragrunt | >= 1.1.0 | Ver instrucciones más abajo |
+| AWS CLI | v2 | Ejecutar `sudo /tmp/aws/install` después de descargarlo |
 
-### Start MiniStack
+### Iniciar MiniStack
 
-MiniStack is the local AWS emulator. Start it before running any Terragrunt commands:
+MiniStack es el emulador local de AWS. Inícialo antes de ejecutar comandos de Terragrunt:
 
 ```bash
 docker run --rm -d \
@@ -158,16 +148,16 @@ docker run --rm -d \
   ministackorg/ministack
 ```
 
-Verify it is healthy:
+Comprueba que esté disponible:
 
 ```bash
 curl -s http://localhost:4566/_ministack/health | python3 -m json.tool | grep '"dynamodb"'
-# Expected: "dynamodb": "available"
+# Resultado esperado: "dynamodb": "available"
 ```
 
-`/_ministack/health` is MiniStack's documented health endpoint. MiniStack also accepts `/_localstack/health` for LocalStack compatibility.
+`/_ministack/health` es el endpoint de salud documentado por MiniStack. También acepta `/_localstack/health` para mantener compatibilidad con LocalStack.
 
-### Install Terraform (Linux)
+### Instalar Terraform (Linux)
 
 ```bash
 sudo apt-get update && sudo apt-get install -y gnupg software-properties-common
@@ -177,10 +167,10 @@ sudo apt-get update && sudo apt-get install terraform
 terraform -version
 ```
 
-### Install Terragrunt (Linux)
+### Instalar Terragrunt (Linux)
 
 ```bash
-# Download latest release
+# Descargar la última versión
 TGVERSION=$(curl -s https://api.github.com/repos/gruntwork-io/terragrunt/releases/latest \
   | grep tag_name | cut -d '"' -f 4)
 
@@ -193,18 +183,18 @@ sudo mv /tmp/terragrunt /usr/local/bin/terragrunt
 terragrunt --version
 ```
 
-### Install AWS CLI v2 (Linux)
+### Instalar AWS CLI v2 (Linux)
 
 ```bash
 curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o /tmp/awscliv2.zip
 unzip /tmp/awscliv2.zip -d /tmp/
 sudo /tmp/aws/install --update
-aws --version  # must show aws-cli/2.x.x
+aws --version  # debe mostrar aws-cli/2.x.x
 ```
 
-### Configure AWS CLI local profile
+### Configurar el perfil local de AWS CLI
 
-Add the following to your AWS config files (create them if they don't exist):
+Agrega lo siguiente a los archivos de configuración de AWS (créelos si todavía no existen):
 
 ```bash
 # ~/.aws/credentials
@@ -219,30 +209,28 @@ output = json
 endpoint_url = http://localhost:4566
 ```
 
-Verify the profile works:
+Comprueba que el perfil funcione:
 
 ```bash
 aws --profile local s3 ls
-# Returns empty list if MiniStack is running and no buckets exist yet
+# Devuelve una lista vacía si MiniStack está activo y todavía no hay buckets
 ```
 
----
+## Flujo de trabajo local
 
-## Local Workflow
-
-### Verify MiniStack is running
+### Comprobar que MiniStack está activo
 
 ```bash
 docker ps | grep ministack
 ```
 
-### Create the remote state bucket (first time only)
+### Crear el bucket de estado remoto (solo la primera vez)
 
 ```bash
 aws --profile local s3 mb s3://tienda-tfstate
 ```
 
-### Deploy a single stack
+### Desplegar un solo stack
 
 ```bash
 cd terraform/live/dev/dynamodb_products
@@ -251,7 +239,7 @@ terragrunt plan
 terragrunt apply
 ```
 
-### Deploy all stacks in an environment
+### Desplegar todos los stacks de un entorno
 
 ```bash
 cd terraform/live/dev
@@ -259,9 +247,9 @@ terragrunt run --all plan
 terragrunt run --all apply
 ```
 
-Terragrunt resolves dependency order automatically — SNS/SQS are applied in the correct sequence.
+Terragrunt resuelve automáticamente el orden de dependencias: aplica SQS antes que SNS.
 
-### Deploy all environments (local MiniStack only)
+### Desplegar todos los entornos (solo MiniStack local)
 
 ```bash
 cd terraform/live
@@ -269,15 +257,13 @@ terragrunt run --all plan
 terragrunt run --all apply
 ```
 
-This command applies `dev`, `stg`, and `prod`; deploy one environment at a time for AWS.
+Este comando aplica `dev`, `stg` y `prod`. En AWS, despliega un entorno por vez.
 
----
+## Estado remoto
 
-## Remote State
+Cada stack almacena su estado en el S3 de MiniStack, usando una ruta derivada de la estructura de directorios:
 
-Each stack stores its state in MiniStack S3 under the path derived from the directory structure:
-
-| Stack | State key |
+| Stack | Clave de estado |
 |-------|-----------|
 | dev/s3_website | `live/dev/s3_website/terraform.tfstate` |
 | dev/sqs_orders | `live/dev/sqs_orders/terraform.tfstate` |
@@ -287,36 +273,32 @@ Each stack stores its state in MiniStack S3 under the path derived from the dire
 | stg/... | `live/stg/.../terraform.tfstate` |
 | prod/... | `live/prod/.../terraform.tfstate` |
 
-Inspect state files:
+Lista los archivos de estado:
 
 ```bash
 aws --profile local s3 ls s3://tienda-tfstate --recursive
 ```
 
----
+## Dependencias entre stacks
 
-## Cross-Stack Dependencies
-
-The SNS stack depends on SQS because it needs the queue ARN and URL to create the subscription and queue policy. The dependency is one-way; there is no cycle:
+El stack SNS depende de SQS porque necesita el ARN y la URL de la cola para crear la suscripción y la política de la cola. La dependencia es unidireccional, no hay un ciclo:
 
 ```
 sns_alerts  ──depends_on──▶  sqs_orders (needs queue_arn and queue_url)
 ```
 
-Terragrunt applies SQS before SNS and passes the real queue outputs to the SNS stack. `mock_outputs` are only for `validate`/`plan` when the dependency has not yet been deployed; they are not used by `apply`.
+Terragrunt aplica SQS antes que SNS y pasa los outputs reales de la cola al stack SNS. `mock_outputs` se usan únicamente en `validate` o `plan` cuando la dependencia todavía no está desplegada; no se usan en `apply`.
 
----
+## Comandos de verificación
 
-## Verification Commands
-
-After `terragrunt run --all apply` in `live/dev/`:
+Después de ejecutar `terragrunt run --all apply` en `live/dev/`:
 
 ```bash
-# S3 static website
+# Sitio web estático en S3
 aws --profile local s3 ls
 aws --profile local s3api get-bucket-website --bucket tienda-dev-static
 
-# Browse the product catalog
+# Abrir el catálogo de productos
 # http://localhost:4566/tienda-dev-static/index.html
 
 # SQS
@@ -332,15 +314,13 @@ aws --profile local dynamodb scan --table-name tienda-dev-products
 # Secrets Manager
 aws --profile local secretsmanager list-secrets
 
-# Remote state
+# Estado remoto
 aws --profile local s3 ls s3://tienda-tfstate --recursive
 ```
 
----
+## Diferencias entre entornos
 
-## Environment Differences
-
-The only source of environment-specific config is `env.hcl`:
+La única fuente de configuración específica de cada entorno es `env.hcl`:
 
 ```hcl
 # live/dev/env.hcl
@@ -359,17 +339,15 @@ locals {
 }
 ```
 
-That value is read by `root.hcl` and propagates to every stack's provider, resource names (`tienda-dev-*`, `tienda-stg-*`, `tienda-prod-*`), tags, and state key paths. All three environments use the same modules and `terraform/live` Terragrunt stacks. There are no separate Terraform environment roots; `live` is the source of truth.
+Ese valor lo lee `root.hcl` y se propaga al provider de cada stack, los nombres de recursos (`tienda-dev-*`, `tienda-stg-*`, `tienda-prod-*`), las etiquetas y las rutas de estado. Los tres entornos usan los mismos módulos y stacks de Terragrunt en `terraform/live`. No hay raíces Terraform separadas: `live` es la fuente de verdad.
 
----
+## Despliegue en AWS (`dev`, `stg`, `prod`)
 
-## Deploying to AWS (`dev`, `stg`, `prod`)
+La configuración actual es únicamente para MiniStack y se mantiene para el uso local. No la apuntes directamente a AWS: el provider y el backend S3 usan `localhost:4566` y credenciales de prueba, y el módulo del sitio web permite lectura pública de objetos. Antes de desplegar en AWS, aplica los siguientes cambios en una configuración o rama específica para AWS. Nunca mezcles el estado ni las credenciales de MiniStack con los de AWS.
 
-The current configuration is for MiniStack only and remains unchanged for local use. Do not point it at AWS as-is: the provider and S3 backend use `localhost:4566` and test credentials, and the website module grants public object reads. Make the following changes in an AWS-specific copy/branch of the configuration before any AWS deployment; never mix the MiniStack and AWS state or credentials.
+### Cambios de configuración necesarios
 
-### Required configuration changes
-
-1. **Use AWS credentials and provider settings.** Keep the current `terraform/root.hcl` for MiniStack. For AWS, create a separate root config and have the live stacks include it in the AWS deployment branch/configuration. In the AWS provider block remove `access_key`, `secret_key`, `skip_credentials_validation`, `skip_metadata_api_check`, `skip_requesting_account_id`, and the complete `endpoints` block. Use AWS CLI SSO credentials locally or an IAM role/OIDC in CI; never commit credentials. Set the AWS region explicitly per environment. The AWS provider should rely on its normal credential chain, for example:
+1. **Usa credenciales y configuración de provider de AWS.** Mantén `terraform/root.hcl` para MiniStack. Para AWS, crea una configuración raíz separada y haz que los stacks live la incluyan en el flujo de despliegue para AWS. En el bloque del provider AWS elimina `access_key`, `secret_key`, `skip_credentials_validation`, `skip_metadata_api_check`, `skip_requesting_account_id` y todo el bloque `endpoints`. Usa credenciales de AWS CLI con SSO localmente o un rol IAM/OIDC en CI; nunca guardes credenciales en el repositorio. Define explícitamente la región de AWS para cada entorno. El provider debe usar la cadena normal de credenciales, por ejemplo:
 
    ```hcl
    provider "aws" {
@@ -385,14 +363,14 @@ The current configuration is for MiniStack only and remains unchanged for local 
    }
    ```
 
-2. **Use a dedicated AWS remote-state bucket.** Create it outside these application stacks in the target AWS account. Enable versioning, server-side encryption, S3 public-access blocking, and least-privilege access for deployment roles. Use a globally unique bucket name and a separate bucket/account for production where possible. In the AWS `remote_state.config`, remove MiniStack's `endpoint`, test `access_key`/`secret_key`, all `skip_*` options, and `force_path_style`; set the AWS bucket, region, encryption, and a unique key per environment/stack. Enable S3 lock files with `use_lockfile = true` and raise every Terraform `required_version` minimum to `>= 1.10.0`. Never point AWS at `tienda-tfstate` in MiniStack or reuse local state.
-3. **Deploy the existing `stg` environment.** `terraform/live/stg` already contains `env.hcl` and all five stack configs. It is accepted by the module environment validations and has isolated names/state keys. Include `stg` in CI plan checks and deploy from that directory, just as with dev/prod.
-4. **Keep public S3 behavior local; change it for AWS.** The current S3 module deliberately disables all four public-access-block settings and attaches a policy granting `s3:GetObject` to `Principal = "*"`. Leave it unchanged for the local MiniStack demo. For AWS, set all four public-access-block settings to `true`, remove that public policy, and keep the bucket private. Add a CloudFront distribution using the S3 REST endpoint (not the S3 website endpoint), configure Origin Access Control (OAC), and add a bucket policy that grants `s3:GetObject` only to `cloudfront.amazonaws.com`, conditioned on the specific CloudFront distribution ARN. Configure TLS and DNS as required. Implement these as AWS-specific module inputs/resources so MiniStack behavior remains local-only; inspect the plan and resulting bucket policy before applying.
-5. **Review production controls.** Use separate AWS accounts or strong role boundaries for dev/stg/prod; define least-privilege deployment permissions; review SQS retention/visibility/redrive settings, SNS delivery/alarms, DynamoDB backups/PITR and encryption, and Secrets Manager rotation/access. State and plan artifacts can contain sensitive values: restrict access, encrypt them, and do not print secrets in CI logs. Deploy one environment at a time with production approvals.
+2. **Usa un bucket de estado remoto exclusivo para AWS.** Créalo fuera de estos stacks de aplicación y en la cuenta AWS de destino. Habilita versionado, cifrado del lado del servidor, bloqueo de acceso público y acceso de mínimo privilegio para los roles de despliegue. Usa un nombre de bucket globalmente único y, cuando sea posible, una cuenta o bucket separado para producción. En `remote_state.config` de AWS elimina `endpoint`, las credenciales de prueba `access_key`/`secret_key`, todas las opciones `skip_*` y `force_path_style`; configura el bucket, la región, el cifrado y una clave única por entorno y stack. Habilita el bloqueo de archivos S3 con `use_lockfile = true` y aumenta a `>= 1.10.0` la versión mínima de Terraform en todos los módulos. Nunca uses el bucket MiniStack `tienda-tfstate` ni reutilices el estado local para AWS.
+3. **Despliega el entorno `stg` existente.** `terraform/live/stg` ya contiene `env.hcl` y los cinco archivos de configuración de stacks. Está habilitado en las validaciones de entorno de los módulos y tiene nombres de recursos y claves de estado aislados. Inclúyelo en los planes de CI y despliega desde ese directorio, igual que `dev` y `prod`.
+4. **Mantén el S3 público para uso local y cámbialo para AWS.** El módulo S3 desactiva intencionalmente las cuatro opciones de bloqueo de acceso público y agrega una política que concede `s3:GetObject` a `Principal = "*"`. Déjalo así para el demo local de MiniStack. En AWS, activa las cuatro opciones de bloqueo, elimina esa política pública y mantén el bucket privado. Agrega una distribución CloudFront con el endpoint REST de S3 (no el endpoint de sitio web), configura Origin Access Control (OAC) y agrega una política de bucket que permita `s3:GetObject` únicamente a `cloudfront.amazonaws.com`, condicionada al ARN específico de la distribución. Configura TLS y DNS según sea necesario. Implementa estas opciones como inputs o recursos específicos de AWS para mantener MiniStack solo en local; revisa el plan y la política resultante antes de aplicar.
+5. **Revisa los controles de producción.** Usa cuentas AWS separadas o límites claros entre roles de `dev`, `stg` y `prod`; define permisos de despliegue de mínimo privilegio; revisa retención, visibilidad y redrive de SQS, entrega de SNS y alarmas, respaldos/PITR y cifrado de DynamoDB, y rotación/acceso a Secrets Manager. El estado y los planes pueden contener datos sensibles: limita su acceso, cífralos y no imprimas secretos en los logs de CI. Despliega un entorno por vez y exige aprobación para producción.
 
-### Suggested AWS deployment flow
+### Flujo de despliegue sugerido en AWS
 
-After creating the AWS-specific root/provider/backend and making the S3 website private behind CloudFront, configure AWS SSO/role access and verify the active account and region before every deployment. Deploy environments separately, review plans, and apply only the reviewed plan:
+Después de crear la configuración raíz, el provider y el backend específicos de AWS, y de poner el sitio S3 privado detrás de CloudFront, configura el acceso mediante SSO/roles de AWS y verifica la cuenta y la región activas antes de cada despliegue. Despliega cada entorno por separado, revisa el plan y aplica únicamente los cambios aprobados:
 
 ```bash
 aws sts get-caller-identity --profile tienda-dev
@@ -401,10 +379,10 @@ terragrunt run --all plan
 terragrunt run --all apply
 ```
 
-Repeat with the appropriate profile and directory for `stg` and `prod`. Use production approvals in CI/CD, and do not run `terragrunt run --all apply` from `terraform/live` against AWS because that applies every environment in one operation.
+Repite el proceso con el perfil y directorio correspondientes a `stg` y `prod`. Usa aprobaciones de producción en CI/CD. No ejecutes `terragrunt run --all apply` desde `terraform/live` contra AWS, porque aplicaría todos los entornos en una sola operación.
 
-### Current review notes
+### Notas del proyecto
 
-- Product `price` and `stock` are DynamoDB Number attributes. `stock` is a unit count; the catalog shows zero as out of stock and quantities of five or less as low stock. Review the Terraform plan when upgrading an existing deployment so seeded item values change from strings to numbers; manually managed records need their own migration.
-- MiniStack's documented health route is `/_ministack/health`. It also accepts `/_localstack/health` as a LocalStack-compatible alias.
-- The project provisions foundational demo services, not a complete production commerce platform. Authentication, checkout/payment processing, application runtime, observability, backups, and a CDN/domain are outside the current modules.
+- `price` y `stock` son atributos de tipo Number en DynamoDB. `stock` representa unidades disponibles: el catálogo indica agotado cuando es cero y pocas unidades cuando es cinco o menos. Al actualizar una instalación existente, revisa el plan para confirmar el cambio de tipo de los productos iniciales; los registros administrados manualmente requieren su propia migración.
+- La ruta de salud documentada por MiniStack es `/_ministack/health`. También acepta `/_localstack/health` como alias compatible con LocalStack.
+- El proyecto aprovisiona servicios básicos para una demostración, no una plataforma de comercio completa para producción. Autenticación, checkout/pagos, ejecución de la aplicación, observabilidad, respaldos y CDN/dominio están fuera del alcance de los módulos actuales.
